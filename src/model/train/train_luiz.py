@@ -16,6 +16,8 @@ import pandas as pd
 
 import scikitplot as skplt
 
+import mlflow
+
 # COMMAND ----------
 
 # DBTITLE 1,Sample
@@ -111,7 +113,6 @@ cat_features = x_train.dtypes[x_train.dtypes == 'object'].index.tolist()
 
 x_train.describe()
 
-
 # COMMAND ----------
 
 # DBTITLE 1,Modify
@@ -127,24 +128,43 @@ fe_onehot = encoding.OneHotEncoder(variables=cat_features)
 # COMMAND ----------
 
 # DBTITLE 1,Modeling
-model = ensemble.RandomForestClassifier(min_samples_leaf=25, n_estimators=250)
-
-
+model = ensemble.AdaBoostClassifier(n_estimators = 250, learning_rate = 0.85, random_state = 42)
 
 model_pipeline = pipeline.Pipeline( [ ("Missing Flag", fe_missing_flag),
                                       ("Missing Zero", fe_missing_zero),
                                       ("OneHot", fe_onehot),
                                       ("Classificador", model)] )
 
-model_pipeline.fit(x_train, y_train)
-
 # COMMAND ----------
 
-y_train_predict = model_pipeline.predict(x_train)
+mlflow.set_experiment("/Users/luizpedro6@gmail.com/ex-churn-luiz")
 
-acc_train = metrics.accuracy_score(y_train, y_train_predict)
+with mlflow.start_run():
+    
+    metrics_dct = {}
 
-print("Acurácia treino:", acc_train)
+    mlflow.sklearn.autolog()
+    
+    print("Treinando o modelo...")
+    model_pipeline.fit(x_train, y_train)
+    print("Modelo Treinado!")
+    
+    y_train_predict = model_pipeline.predict(x_train)
+    y_train_proba = model_pipeline.predict_proba(x_train)
+    metrics_dct["acc_train"] = metrics.accuracy_score(y_train, y_train_predict)
+    metrics_dct["auc_train"] = metrics.roc_auc_score(y_train, y_train_proba[:,1])
+    
+    y_test_predict = model_pipeline.predict(x_test)
+    y_test_proba = model_pipeline.predict_proba(x_test)
+    metrics_dct["acc_test"] = metrics.accuracy_score(y_test, y_test_predict)
+    metrics_dct["auc_test"] = metrics.roc_auc_score(y_test, y_test_proba[:,1])
+    
+    y_oot_predict = model_pipeline.predict(df_oot[features])
+    y_oot_proba = model_pipeline.predict_proba(df_oot[features])
+    metrics_dct["acc_oot"] = metrics.accuracy_score(df_oot[target], y_oot_predict)
+    metrics_dct["auc_oot"] = metrics.roc_auc_score(df_oot[target], y_oot_proba[:,1])
+    
+    mlflow.log_metrics(metrics_dct)
 
 # COMMAND ----------
 
@@ -157,6 +177,7 @@ print("Acurácia teste:", acc_test)
 
 # COMMAND ----------
 
+# DBTITLE 1,Feature Importance
 features_fit = model_pipeline[:-1].transform(x_train).columns.tolist()
 
 features_importance = pd.Series(model.feature_importances_, index=features_fit)
@@ -180,7 +201,7 @@ skplt.metrics.plot_lift_curve(y_test, y_probas)
 
 # COMMAND ----------
 
-y_probas_oot = model_pipeline.predict_proba(df_oot[features])
+y_probas_oot = grid_model.predict_proba(df_oot[features])
 
 skplt.metrics.plot_roc(df_oot[target], y_probas_oot)
 

@@ -111,7 +111,6 @@ cat_features = x_train.dtypes[x_train.dtypes == 'object'].index.tolist()
 
 x_train.describe()
 
-
 # COMMAND ----------
 
 # DBTITLE 1,Modify
@@ -127,20 +126,36 @@ fe_onehot = encoding.OneHotEncoder(variables=cat_features)
 # COMMAND ----------
 
 # DBTITLE 1,Modeling
-model = ensemble.RandomForestClassifier(min_samples_leaf=25, n_estimators=250)
+model = ensemble.RandomForestClassifier(random_state = 42)
 
+params = {
+          "min_samples_leaf": [10,25,50],
+          "n_estimators": [50,100,250,500]
+         }
 
+grid_model = model_selection.GridSearchCV(model, 
+                                          params, 
+                                          n_jobs = -1, 
+                                          scoring = 'roc_auc', 
+                                          cv = 3,
+                                          verbose = 3,
+                                          )
 
 model_pipeline = pipeline.Pipeline( [ ("Missing Flag", fe_missing_flag),
                                       ("Missing Zero", fe_missing_zero),
                                       ("OneHot", fe_onehot),
-                                      ("Classificador", model)] )
+                                      ("Classificador", grid_model)] )
 
 model_pipeline.fit(x_train, y_train)
 
 # COMMAND ----------
 
-y_train_predict = model_pipeline.predict(x_train)
+cv_result = pd.DataFrame(grid_model.cv_results_)
+cv_result
+
+# COMMAND ----------
+
+y_train_predict = grid_model.predict(x_train)
 
 acc_train = metrics.accuracy_score(y_train, y_train_predict)
 
@@ -148,8 +163,8 @@ print("Acurácia treino:", acc_train)
 
 # COMMAND ----------
 
-y_test_predict = model_pipeline.predict(x_test)
-y_probas = model_pipeline.predict_proba(x_test)
+y_test_predict = grid_model.predict(x_test)
+y_probas = grid_model.predict_proba(x_test)
 
 acc_test = metrics.accuracy_score(y_test, y_test_predict)
 
@@ -157,7 +172,8 @@ print("Acurácia teste:", acc_test)
 
 # COMMAND ----------
 
-features_fit = model_pipeline[:-1].transform(x_train).columns.tolist()
+# DBTITLE 1,Feature Importance
+features_fit = grid_model[:-1].transform(x_train).columns.tolist()
 
 features_importance = pd.Series(model.feature_importances_, index=features_fit)
 features_importance.sort_values(ascending=False).head(15)
@@ -180,7 +196,7 @@ skplt.metrics.plot_lift_curve(y_test, y_probas)
 
 # COMMAND ----------
 
-y_probas_oot = model_pipeline.predict_proba(df_oot[features])
+y_probas_oot = grid_model.predict_proba(df_oot[features])
 
 skplt.metrics.plot_roc(df_oot[target], y_probas_oot)
 
